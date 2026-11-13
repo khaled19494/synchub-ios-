@@ -78,6 +78,13 @@ final class TreatwellClient {
         return Array(ids)
     }
 
+    // The raw calendar for a date range, exactly as Treatwell returns it. SyncHub works out what is new.
+    func calendarRaw(from: String, to: String) async -> Data? {
+        let path = "/calendar.json?date-from=\(from)&date-to=\(to)&include=appointments%2Cblocks&appointment-status-codes=CR%2CCN%2CNS%2CCP"
+        guard let (status, data) = try? await request("GET", path), status == 200 else { return nil }
+        return data
+    }
+
     struct LoginNeeded: Error {}
     struct SimpleError: Error { let text: String; init(_ t: String) { text = t } }
 

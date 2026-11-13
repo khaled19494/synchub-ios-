@@ -14,6 +14,8 @@ final class HelperEngine: ObservableObject {
     private let keepAlive = KeepAlive()
     private let client = TreatwellClient()
     private var loop: Task<Void, Never>? = nil
+    private var tick = 0
+    private var learned = false
 
     init() { if running && !key.isEmpty { start() } }
 
@@ -77,10 +79,32 @@ final class HelperEngine: ObservableObject {
                 done += 1
             }
             lastOk = Date()
+            tick += 1
+            if tick % 6 == 1 { await uploadCalendar() }
             status = done > 0 ? "Did \(done) job(s)." : "OK, nothing to do."
         } catch {
             status = "Waiting for internet…"
         }
+    }
+
+    // Sends Treatwell's own calendar (next 30 days) to SyncHub so bookings made on Treatwell appear in SyncHub.
+    private func uploadCalendar() async {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_GB_POSIX")
+        f.timeZone = TimeZone(identifier: "Europe/London")
+        f.dateFormat = "yyyy-MM-dd"
+        let from = f.string(from: Date())
+        let to = f.string(from: Date().addingTimeInterval(30 * 86400))
+        guard let data = await client.calendarRaw(from: from, to: to) else { return }
+        var req = URLRequest(url: URL(string: Config.synchub + "/api/helper/calendar")!)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 30
+        headers().forEach { req.setValue($1, forHTTPHeaderField: $0) }
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !learned { req.setValue("1", forHTTPHeaderField: "x-helper-learn") }
+        req.httpBody = data
+        if let (_, resp) = try? await URLSession.shared.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200 { learned = true }
     }
 
     private func report(job: Job, out: JobResult, ms: Int) async {
