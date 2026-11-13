@@ -1,0 +1,30 @@
+name: iOS helper
+on:
+  push:
+    branches: [main]
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        working-directory: ios
+        run: xcodegen generate
+      - name: Build (unsigned)
+        working-directory: ios
+        run: |
+          xcodebuild -project SyncHubHelper.xcodeproj -scheme SyncHubHelper -configuration Release \
+            -sdk iphoneos -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" | tail -60
+      - name: Package IPA
+        working-directory: ios
+        run: |
+          mkdir Payload && cp -R build/Build/Products/Release-iphoneos/SyncHubHelper.app Payload/
+          zip -qr synchub-helper.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synchub-helper-ipa
+          path: ios/synchub-helper.ipa
