@@ -4,6 +4,7 @@ import WebKit
 struct Job: Decodable {
     let id: Int
     let action: String
+    let platform: String?
     let block_date: String
     let start_time: String
     let end_time: String?
@@ -11,6 +12,8 @@ struct Job: Decodable {
     let service_id: Int?
     let sku_id: Int?
     let treatwell_appointment_id: Int?
+    let location_id: Int?
+    let fresha_block_id: Int?
 }
 
 struct JobResult {

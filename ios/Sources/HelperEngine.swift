@@ -9,10 +9,12 @@ final class HelperEngine: ObservableObject {
     @Published var running: Bool = UserDefaults.standard.bool(forKey: "running")
     @Published var status: String = "Not started."
     @Published var needsLogin = false
+    @Published var needsFreshaLogin = false
     @Published var lastOk: Date? = nil
 
     private let keepAlive = KeepAlive()
     private let client = TreatwellClient()
+    private let fresha = FreshaClient()
     private var loop: Task<Void, Never>? = nil
     private var tick = 0
     private var learned = false
@@ -47,7 +49,7 @@ final class HelperEngine: ObservableObject {
     }
 
     private func headers() -> [String: String] {
-        ["Authorization": "Bearer \(key)", "x-helper-version": Config.version]
+        ["Authorization": "Bearer \(key)", "x-helper-version": Config.version, "x-helper-platforms": "treatwell,fresha"]
     }
 
     private func pollOnce() async {
@@ -65,18 +67,27 @@ final class HelperEngine: ObservableObject {
             struct Reply: Decodable { let jobs: [Job] }
             let jobs = try JSONDecoder().decode(Reply.self, from: data).jobs
             var done = 0
+            var treatwellLoginNeeded = false
+            var freshaLoginNeeded = false
             for job in jobs {
+                let isFresha = job.platform == "fresha"
+                // A platform that needs a login keeps its jobs waiting; the other platform carries on.
+                if isFresha ? freshaLoginNeeded : treatwellLoginNeeded { continue }
                 let t0 = Date()
-                let out = await client.run(job)
+                let out = isFresha ? await fresha.run(job) : await client.run(job)
                 if out.needsLogin {
                     // Don't tell SyncHub it failed: the job stays waiting until the person logs in again.
-                    needsLogin = true
-                    status = "Log in to Treatwell inside this app."
-                    return
+                    if isFresha { freshaLoginNeeded = true } else { treatwellLoginNeeded = true }
+                    continue
                 }
-                needsLogin = false
                 await report(job: job, out: out, ms: Int(Date().timeIntervalSince(t0) * 1000))
                 done += 1
+            }
+            needsLogin = treatwellLoginNeeded
+            needsFreshaLogin = freshaLoginNeeded
+            if treatwellLoginNeeded || freshaLoginNeeded {
+                status = treatwellLoginNeeded ? "Log in to Treatwell inside this app." : "Log in to Fresha inside this app."
+                return
             }
             lastOk = Date()
             tick += 1
@@ -112,7 +123,7 @@ final class HelperEngine: ObservableObject {
         if let id = out.appointmentId { body["appointmentId"] = id }
         if let e = out.error { body["error"] = e }
         if let n = out.note { body["note"] = n }
-        var req = URLRequest(url: URL(string: Config.synchub + "/api/helper/jobs/\(job.id)")!)
+        var req = URLRequest(url: URL(string: Config.synchub + "/api/helper/jobs/\(job.id)" + (job.platform == "fresha" ? "?platform=fresha" : ""))!)
         req.httpMethod = "POST"
         req.timeoutInterval = 20
         headers().forEach { req.setValue($1, forHTTPHeaderField: $0) }

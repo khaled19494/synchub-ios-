@@ -2,10 +2,11 @@ import SwiftUI
 import WebKit
 
 struct TreatwellWebView: UIViewRepresentable {
+    var url: String = Config.treatwell
     func makeUIView(context: Context) -> WKWebView {
         let w = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
         w.customUserAgent = Config.userAgent
-        w.load(URLRequest(url: URL(string: Config.treatwell)!))
+        w.load(URLRequest(url: URL(string: url)!))
         return w
     }
     func updateUIView(_ uiView: WKWebView, context: Context) {}
@@ -15,6 +16,7 @@ struct ContentView: View {
     @EnvironmentObject var engine: HelperEngine
     @State private var keyText = ""
     @State private var showLogin = false
+    @State private var showFreshaLogin = false
 
     var body: some View {
         NavigationView {
@@ -29,6 +31,10 @@ struct ContentView: View {
                     Button("Log in to Treatwell") { showLogin = true }
                     if engine.needsLogin { Text("Please log in again.").foregroundColor(.red) }
                 }
+                Section(header: Text("2b. Fresha (optional)")) {
+                    Button("Log in to Fresha") { showFreshaLogin = true }
+                    if engine.needsFreshaLogin { Text("Please log in to Fresha.").foregroundColor(.red) }
+                }
                 Section(header: Text("3. Run")) {
                     Toggle("Helper ON", isOn: Binding(get: { engine.running }, set: { $0 ? engine.start() : engine.stop() }))
                     Text(engine.status)
@@ -42,6 +48,12 @@ struct ContentView: View {
                     TreatwellWebView().navigationTitle("Treatwell")
                         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showLogin = false } } }
                 }
+            }
+        }
+        .sheet(isPresented: $showFreshaLogin) {
+            NavigationView {
+                TreatwellWebView(url: Config.fresha).navigationTitle("Fresha")
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showFreshaLogin = false } } }
             }
         }
         .navigationViewStyle(.stack)
