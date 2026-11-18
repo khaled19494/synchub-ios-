@@ -24,8 +24,9 @@ final class FreshaClient {
     private struct Failed: Error { let text: String }
 
     private func graphql(_ op: String, query: String, variables: [String: Any]) async throws -> [String: Any] {
-        var comps = URLComponents(string: "https://partners-api-gateway.fresha.com/graphql")!
-        comps.queryItems = [URLQueryItem(name: "_query", value: op), URLQueryItem(name: "_client_platform", value: "web"), URLQueryItem(name: "_client_version", value: clientVersion)]
+        // Blocked time lives on Fresha's staff-working-hours service, not the calendar gateway.
+        var comps = URLComponents(string: "https://staff-working-hours-api.fresha.com/graphql")!
+        comps.queryItems = [URLQueryItem(name: "_client_platform", value: "web"), URLQueryItem(name: "_client_version", value: clientVersion)]
         var req = URLRequest(url: comps.url!)
         req.httpMethod = "POST"
         let cookie = await cookieHeader()
