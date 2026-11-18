@@ -92,6 +92,7 @@ final class HelperEngine: ObservableObject {
             lastOk = Date()
             tick += 1
             if tick % 6 == 1 { await uploadCalendar() }
+            if tick % 6 == 4 { await uploadFreshaCalendar() }
             status = done > 0 ? "Did \(done) job(s)." : "OK, nothing to do."
         } catch {
             status = "Waiting for internet…"
@@ -116,6 +117,36 @@ final class HelperEngine: ObservableObject {
         if !learned { req.setValue("1", forHTTPHeaderField: "x-helper-learn") }
         req.httpBody = data
         if let (_, resp) = try? await URLSession.shared.data(for: req), (resp as? HTTPURLResponse)?.statusCode == 200 { learned = true }
+    }
+
+
+    // Reads Fresha's calendar (next 30 days, cancelled bookings included) and sends it to SyncHub,
+    // so Fresha bookings appear in SyncHub and Fresha cancellations cancel them here.
+    private func uploadFreshaCalendar() async {
+        struct Cfg: Decodable { let locationId: String?; let employeeIds: [String] }
+        var creq = URLRequest(url: URL(string: Config.synchub + "/api/helper/fresha-calendar")!)
+        creq.timeoutInterval = 20
+        headers().forEach { creq.setValue($1, forHTTPHeaderField: $0) }
+        guard let (cdata, cresp) = try? await URLSession.shared.data(for: creq),
+              (cresp as? HTTPURLResponse)?.statusCode == 200,
+              let cfg = try? JSONDecoder().decode(Cfg.self, from: cdata),
+              let loc = cfg.locationId, !cfg.employeeIds.isEmpty else { return }
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_GB_POSIX")
+        f.timeZone = TimeZone(identifier: "Europe/London")
+        f.dateFormat = "yyyy-MM-dd"
+        let dates = (0..<30).map { f.string(from: Date().addingTimeInterval(Double($0) * 86400)) }
+        let out = await fresha.calendarRaw(dates: dates, locationId: loc, employeeIds: cfg.employeeIds)
+        if out.needsLogin { needsFreshaLogin = true; return }
+        guard let data = out.data else { return }
+        var req = URLRequest(url: URL(string: Config.synchub + "/api/helper/fresha-calendar")!)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 30
+        headers().forEach { req.setValue($1, forHTTPHeaderField: $0) }
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = data
+        _ = try? await URLSession.shared.data(for: req)
     }
 
     private func report(job: Job, out: JobResult, ms: Int) async {

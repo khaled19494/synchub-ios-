@@ -50,6 +50,52 @@ final class FreshaClient {
         return json
     }
 
+
+    private let calendarQuery = "query calendar_dailyCalendarEvents($dates: [PartnersCalendar_PlainDate!]!, $locationIds: [ID!]!, $bookableAssets: [PartnersCalendar_BookableAssetInput!]!, $filters: PartnersCalendar_CalendarEventFiltersInput, $options: PartnersCalendar_CalendarEventOptionsInput) { dailyCalendarEvents: PartnersCalendar_dailyCalendarEvents(dates: $dates, locationIds: $locationIds, bookableAssets: $bookableAssets, filters: $filters, options: $options) { date bookableAsset { ... on PartnersCalendar_BookableEmployee { id } } events { start end details { __typename ... on PartnersCalendar_CalendarBookingEvent { bookingId appointmentId systemStatus service { name } customer { id fullName email contactNumber } } } } } }"
+
+    // Reads Fresha's calendar (bookings, cancelled ones included) for the given days and staff.
+    // Returns the "dailyCalendarEvents" list as JSON, or nil when it could not be read.
+    func calendarRaw(dates: [String], locationId: String, employeeIds: [String]) async -> (data: Data?, needsLogin: Bool) {
+        do {
+            let cookie = await cookieHeader()
+            if cookie.isEmpty { return (nil, true) }
+            var comps = URLComponents(string: "https://partners-api-gateway.fresha.com/graphql")!
+            comps.queryItems = [URLQueryItem(name: "_query", value: "calendar_dailyCalendarEvents"), URLQueryItem(name: "_client_platform", value: "web"), URLQueryItem(name: "_client_version", value: clientVersion)]
+            var req = URLRequest(url: comps.url!)
+            req.httpMethod = "POST"
+            req.setValue(cookie, forHTTPHeaderField: "Cookie")
+            req.setValue(Config.userAgent, forHTTPHeaderField: "User-Agent")
+            req.setValue("https://partners.fresha.com", forHTTPHeaderField: "Origin")
+            req.setValue("https://partners.fresha.com/", forHTTPHeaderField: "Referer")
+            req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            let vars: [String: Any] = [
+                "bookableAssets": employeeIds.map { ["id": $0, "type": "EMPLOYEE"] },
+                "clientCapabilities": ["EVENTUALLY_CONSISTENT_READS"],
+                "dates": dates,
+                "filters": ["eventTypes": ["BOOKING"], "includeCancelled": true],
+                "locationIds": [locationId],
+                "options": ["allowStaleData": true, "groupByBookableAsset": true],
+                "visibilityFilters": [String: Any]()
+            ]
+            let varsJSON = String(data: try JSONSerialization.data(withJSONObject: vars), encoding: .utf8) ?? "{}"
+            var allowed = CharacterSet.alphanumerics
+            allowed.insert(charactersIn: "-._~")
+            func enc(_ x: String) -> String { x.addingPercentEncoding(withAllowedCharacters: allowed) ?? x }
+            let body = "operationName=calendar_dailyCalendarEvents&query=\(enc(calendarQuery))&variables=\(enc(varsJSON))"
+            req.httpBody = body.data(using: .utf8)
+            let (data, resp) = try await session.data(for: req)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if status == 401 || status == 403 { return (nil, true) }
+            guard status == 200, let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return (nil, false) }
+            if json["errors"] != nil { return (nil, false) }
+            guard let list = (json["data"] as? [String: Any])?["dailyCalendarEvents"] else { return (nil, false) }
+            return (try JSONSerialization.data(withJSONObject: ["calendar": list]), false)
+        } catch {
+            return (nil, false)
+        }
+    }
+
     private func hhmmss(_ s: String?) -> String { String((s ?? "").prefix(5)) + ":00" }
 
     func run(_ job: Job) async -> JobResult {
